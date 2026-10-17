@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a1e7e65aa21d4352a1299374c79db075, type: 3}
+  m_Name: Recursos
+  m_EditorClassIdentifier: Assembly-CSharp::Recursos
+  tileset: {fileID: 2800000, guid: 35e3ade77f4fbf040b578fc64c11e440, type: 3}
+  ceu: {fileID: 2800000, guid: b5f70522f516b7031b98f939a425d42b, type: 3}
+  montanhas: {fileID: 2800000, guid: b73c8585470c4b19b5a8209d5bfb4d9a, type: 3}
+  colinas: {fileID: 2800000, guid: e71529b613a34b1183974f429d37e1e0, type: 3}
+  moeda: {fileID: 2800000, guid: 2a1b56a7f6de3abf295c3b73ff8cc553, type: 3}
+  jogadorParado: {fileID: 2800000, guid: 3fb910a4e475dc30a94a7e6b098ebf3e, type: 3}
+  jogadorCorrendo: {fileID: 2800000, guid: 4c05bea3e6728404d8c603be2572a597, type: 3}
+  jogadorPulando: {fileID: 2800000, guid: f192365aadd6d7ccbb5c337456a10bb7, type: 3}
+  jogadorDano: {fileID: 2800000, guid: 9d578a5ddb8a0cc41846fbe450b319cd, type: 3}
+  inimigoA: {fileID: 2800000, guid: 5499e987af6daf7ae91ceececdb81d83, type: 3}
+  inimigoB: {fileID: 2800000, guid: b7343049fa9f8b4eaa546fe714c1657c, type: 3}

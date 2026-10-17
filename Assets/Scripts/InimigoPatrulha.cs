@@ -1,79 +1,71 @@
 using UnityEngine;
 
 /// <summary>
-/// Inimigo que anda de um lado pro outro.
-/// Se o jogador cair em cima dele, o inimigo morre e o jogador quica.
-/// Se encostar pelo lado/baixo, o jogador leva dano.
+/// Inimigo que anda de um lado para o outro entre xMin e xMax.
+/// Pular na cabeça derrota o inimigo; encostar pelo lado machuca o jogador.
 /// </summary>
-[RequireComponent(typeof(Rigidbody2D), typeof(Collider2D))]
+[RequireComponent(typeof(Rigidbody2D))]
 public class InimigoPatrulha : MonoBehaviour
 {
-    [Header("Patrulha")]
-    public Transform pontoA;
-    public Transform pontoB;
-    public float velocidade = 2f;
+    public float velocidade = 1.8f;
+    public float xMin;
+    public float xMax;
 
-    [Header("Animação (opcional)")]
-    public Animator anim;
+    private Rigidbody2D rb;
+    private SpriteRenderer sr;
+    private int direcao = 1;
+    private bool morto;
 
-    private Vector3 alvo;
-    private SpriteRenderer sprite;
-
-    void Start()
+    void Awake()
     {
-        sprite = GetComponent<SpriteRenderer>();
-        if (anim == null) anim = GetComponent<Animator>();
-        alvo = pontoB != null ? pontoB.position : transform.position + Vector3.right * 3f;
-        if (pontoA == null)
-        {
-            GameObject go = new GameObject(name + "_A");
-            go.transform.position = transform.position + Vector3.left * 3f;
-            pontoA = go.transform;
-        }
+        rb = GetComponent<Rigidbody2D>();
+        sr = GetComponent<SpriteRenderer>();
     }
 
-    void Update()
+    void FixedUpdate()
     {
-        transform.position = Vector3.MoveTowards(transform.position, alvo, velocidade * Time.deltaTime);
-
-        if (Vector3.Distance(transform.position, alvo) < 0.1f)
-        {
-            alvo = (alvo == pontoA.position) ? pontoB.position : pontoA.position;
-            // Vira o sprite
-            Vector3 s = transform.localScale;
-            s.x *= -1;
-            transform.localScale = s;
-        }
+        if (morto) return;
+        Vector2 p = rb.position;
+        p.x += direcao * velocidade * Time.fixedDeltaTime;
+        if (p.x >= xMax) { p.x = xMax; direcao = -1; }
+        else if (p.x <= xMin) { p.x = xMin; direcao = 1; }
+        rb.MovePosition(p);
+        if (sr != null) sr.flipX = direcao < 0;
     }
 
-    void OnCollisionEnter2D(Collision2D col)
+    void OnTriggerEnter2D(Collider2D outro) { Tratar(outro); }
+    void OnTriggerStay2D(Collider2D outro) { Tratar(outro); }
+
+    void Tratar(Collider2D outro)
     {
-        if (!col.gameObject.CompareTag("Player")) return;
+        if (morto) return;
+        PlayerController2D jogador = outro.GetComponent<PlayerController2D>();
+        if (jogador == null || !jogador.Vivo) return;
 
-        PlayerController2D player = col.gameObject.GetComponent<PlayerController2D>();
-        if (player == null) return;
+        GameManager gm = GameManager.Garantir();
+        if (gm.Estado != EstadoJogo.Jogando) return;
 
-        // Verifica se o jogador está caindo em cima (pulo no inimigo)
-        // Ponto de contato acima do centro do inimigo = pisou
-        ContactPoint2D contato = col.contacts[0];
-        bool pisouEmCima = contato.point.y > transform.position.y + 0.3f
-                           && player.GetComponent<Rigidbody2D>().linearVelocity.y < 0;
-
-        if (pisouEmCima)
+        bool pisou = jogador.VelocidadeY <= 0.1f && jogador.transform.position.y > transform.position.y + 0.3f;
+        if (pisou)
         {
-            player.Quicar(11f);
-            Morrer();
+            jogador.Quicar(10f);
+            gm.AdicionarPontos(GameManager.PontosInimigo);
+            Derrotar();
         }
         else
         {
-            player.LevarDano(transform.position);
+            jogador.LevarDano(transform.position);
         }
     }
 
-    void Morrer()
+    void Derrotar()
     {
-        // Efeito simples: aumenta pontos e destrói
-        GameManager.Instance?.AdicionarPontos(100);
-        Destroy(gameObject);
+        morto = true;
+        Collider2D c = GetComponent<Collider2D>();
+        if (c != null) c.enabled = false;
+        AnimadorSprite a = GetComponent<AnimadorSprite>();
+        if (a != null) a.enabled = false;
+        transform.localScale = new Vector3(1f, 0.3f, 1f);
+        Destroy(gameObject, 0.3f);
     }
 }

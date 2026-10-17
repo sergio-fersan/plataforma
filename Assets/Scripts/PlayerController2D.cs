@@ -2,138 +2,246 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 
 /// <summary>
-/// Controle do jogador - plataforma 2D.
-/// Funciona com New Input System (Keyboard.current), sem precisar configurar Input Actions.
-/// Arraste para o GameObject do Jogador que tenha Rigidbody2D + BoxCollider2D/CapsuleCollider2D.
+/// Jogador do jogo de plataforma. Cria sozinho collider, sprites e animação.
+/// Controles: setas ou A/D andam; espaço, seta para cima ou W pulam.
 /// </summary>
 [RequireComponent(typeof(Rigidbody2D))]
 public class PlayerController2D : MonoBehaviour
 {
     [Header("Movimento")]
-    public float velocidade = 7f;
-    public float forcaPulo = 13f;
+    public float velocidade = 6.5f;
+    public float forcaPulo = 14f;
+    public float escalaGravidade = 3.2f;
+    public float tempoCoyote = 0.1f;
+    public float tempoBufferPulo = 0.12f;
 
-    [Header("Chão")]
-    public Transform peDoJogador; // objeto vazio nos pés
-    public float raioChao = 0.2f;
-    public LayerMask camadaChao; // marque a Tilemap/Grid como camada "Ground"
-
-    [Header("Vidas / Dano")]
-    public int vidasMax = 3;
-    public float tempoInvencivel = 1f;
+    [Header("Dano")]
+    public float tempoInvencivel = 1.5f;
 
     private Rigidbody2D rb;
-    private Animator anim;
-    private SpriteRenderer sprite;
-    private float tempoInvencivelAtual = 0f;
-    private bool olhandoDireita = true;
+    private CapsuleCollider2D col;
+    private SpriteRenderer sr;
+    private AnimadorSprite anim;
 
-    public int Vidas { get; private set; }
-    public bool EstaNoChao { get; private set; }
+    private Sprite[] spParado, spCorrendo, spPulando, spDano;
+
+    private float coyote;
+    private float bufferPulo;
+    private float invencivel;
+    private float semControle;
+    private float tempoNoChao;
+    private bool cortouPulo = true;
+    private bool morto;
+    private Vector2 ultimoSeguro;
+
+    private static readonly Collider2D[] resultados = new Collider2D[8];
+
+    public bool NoChao { get; private set; }
+    public float VelocidadeY { get { return rb != null ? rb.linearVelocity.y : 0f; } }
+    public bool Vivo { get { return !morto; } }
 
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
-        anim = GetComponent<Animator>();
-        sprite = GetComponent<SpriteRenderer>();
-        Vidas = vidasMax;
-
-        // Trava rotação para o jogador não tombar
+        rb.bodyType = RigidbodyType2D.Dynamic;
+        rb.gravityScale = escalaGravidade;
         rb.freezeRotation = true;
+        rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
+        rb.interpolation = RigidbodyInterpolation2D.Interpolate;
+
+        col = GetComponent<CapsuleCollider2D>();
+        if (col == null) col = gameObject.AddComponent<CapsuleCollider2D>();
+        col.direction = CapsuleDirection2D.Vertical;
+        col.size = new Vector2(0.5f, 0.9f);
+        col.offset = new Vector2(0f, 0.45f);
+        PhysicsMaterial2D semAtrito = new PhysicsMaterial2D("SemAtrito");
+        semAtrito.friction = 0f;
+        semAtrito.bounciness = 0f;
+        col.sharedMaterial = semAtrito;
+
+        sr = GetComponent<SpriteRenderer>();
+        if (sr == null) sr = gameObject.AddComponent<SpriteRenderer>();
+        sr.sortingOrder = 10;
+
+        anim = GetComponent<AnimadorSprite>();
+        if (anim == null) anim = gameObject.AddComponent<AnimadorSprite>();
+
+        Recursos rec = Jogo.Rec;
+        if (rec != null)
+        {
+            spParado = Jogo.Fatiar(rec.jogadorParado, 4);
+            spCorrendo = Jogo.Fatiar(rec.jogadorCorrendo, 6);
+            spPulando = Jogo.Fatiar(rec.jogadorPulando, 8);
+            spDano = Jogo.Fatiar(rec.jogadorDano, 4);
+            anim.Tocar(spParado, 8f, true);
+        }
+
+        ultimoSeguro = transform.position;
     }
 
     void Update()
     {
-        var kb = Keyboard.current;
-        if (kb == null) return;
+        GameManager gm = GameManager.Instancia;
+        bool jogando = gm == null || gm.Estado == EstadoJogo.Jogando || gm.Estado == EstadoJogo.FaseConcluida;
+        bool podeControlar = !morto && (gm == null || gm.Estado == EstadoJogo.Jogando);
 
-        // --- Movimento esquerda/direita ---
+        // ----- Entrada -----
         float mov = 0f;
-        if (kb.leftArrowKey.isPressed || kb.aKey.isPressed) mov -= 1f;
-        if (kb.rightArrowKey.isPressed || kb.dKey.isPressed) mov += 1f;
-
-        rb.linearVelocity = new Vector2(mov * velocidade, rb.linearVelocity.y);
-
-        // Vira o sprite
-        if (mov > 0 && !olhandoDireita) Virar();
-        else if (mov < 0 && olhandoDireita) Virar();
-
-        // --- Chão ---
-        EstaNoChao = false;
-        if (peDoJogador != null)
-            EstaNoChao = Physics2D.OverlapCircle(peDoJogador.position, raioChao, camadaChao);
-
-        // --- Pulo (espaço / seta cima / W) ---
-        bool pulou = kb.spaceKey.wasPressedThisFrame || kb.upArrowKey.wasPressedThisFrame || kb.wKey.wasPressedThisFrame;
-        if (pulou && EstaNoChao)
+        bool pulou = false;
+        bool segurandoPulo = false;
+        Keyboard kb = Keyboard.current;
+        if (podeControlar && kb != null)
         {
-            rb.linearVelocity = new Vector2(rb.linearVelocity.x, forcaPulo);
+            if (kb.leftArrowKey.isPressed || kb.aKey.isPressed) mov -= 1f;
+            if (kb.rightArrowKey.isPressed || kb.dKey.isPressed) mov += 1f;
+            pulou = kb.spaceKey.wasPressedThisFrame || kb.upArrowKey.wasPressedThisFrame || kb.wKey.wasPressedThisFrame;
+            segurandoPulo = kb.spaceKey.isPressed || kb.upArrowKey.isPressed || kb.wKey.isPressed;
         }
 
-        if (tempoInvencivelAtual > 0) tempoInvencivelAtual -= Time.deltaTime;
-
-        // --- Animador (se tiver) ---
-        if (anim != null)
+        // ----- Chão -----
+        NoChao = VerificarChao();
+        if (NoChao)
         {
-            anim.SetFloat("velocidade", Mathf.Abs(mov));
-            anim.SetBool("noChao", EstaNoChao);
+            coyote = tempoCoyote;
+            tempoNoChao += Time.deltaTime;
+            if (tempoNoChao > 0.3f && !morto) ultimoSeguro = transform.position;
         }
+        else
+        {
+            coyote -= Time.deltaTime;
+            tempoNoChao = 0f;
+        }
+
+        if (pulou) bufferPulo = tempoBufferPulo; else bufferPulo -= Time.deltaTime;
+        if (semControle > 0f) semControle -= Time.deltaTime;
+        if (invencivel > 0f) invencivel -= Time.deltaTime;
+
+        Vector2 v = rb.linearVelocity;
+
+        // ----- Movimento horizontal -----
+        if (!morto && semControle <= 0f)
+        {
+            v.x = mov * velocidade;
+        }
+
+        // ----- Pulo (com tolerância e altura variável) -----
+        if (podeControlar && bufferPulo > 0f && coyote > 0f)
+        {
+            v.y = forcaPulo;
+            bufferPulo = 0f;
+            coyote = 0f;
+            cortouPulo = false;
+            anim.Tocar(spPulando, 10f, false);
+        }
+        if (!cortouPulo && !segurandoPulo && v.y > 0f)
+        {
+            v.y *= 0.5f;
+            cortouPulo = true;
+        }
+        if (v.y <= 0f) cortouPulo = true;
+
+        rb.linearVelocity = v;
+
+        // ----- Virar sprite -----
+        if (mov > 0.01f) sr.flipX = false;
+        else if (mov < -0.01f) sr.flipX = true;
+
+        // ----- Animação -----
+        if (!morto)
+        {
+            if (invencivel > tempoInvencivel - 0.35f && semControle > 0f)
+                anim.Tocar(spDano, 12f, false);
+            else if (!NoChao)
+                anim.Tocar(spPulando, 10f, false);
+            else if (Mathf.Abs(mov) > 0.01f)
+                anim.Tocar(spCorrendo, 12f, true);
+            else
+                anim.Tocar(spParado, 8f, true);
+        }
+
+        // ----- Piscar enquanto invencível -----
+        Color c = sr.color;
+        c.a = (invencivel > 0f && !morto && Mathf.FloorToInt(Time.time * 20f) % 2 == 0) ? 0.35f : 1f;
+        sr.color = c;
+
+        // ----- Caiu no buraco -----
+        float limite = gm != null ? gm.limiteQueda : -6f;
+        if (jogando && !morto && transform.position.y < limite) CairNoVazio();
     }
 
-    void Virar()
+    bool VerificarChao()
     {
-        olhandoDireita = !olhandoDireita;
-        Vector3 s = transform.localScale;
-        s.x *= -1;
-        transform.localScale = s;
+        Vector2 centro = (Vector2)transform.position + new Vector2(0f, -0.03f);
+        Vector2 tamanho = new Vector2(0.4f, 0.12f);
+        ContactFilter2D filtro = new ContactFilter2D();
+        filtro.useTriggers = false;
+        int n = Physics2D.OverlapBox(centro, tamanho, 0f, filtro, resultados);
+        for (int i = 0; i < n; i++)
+        {
+            Collider2D c = resultados[i];
+            if (c == null || c == col) continue;
+            if (c.attachedRigidbody == rb) continue;
+            return true;
+        }
+        return false;
     }
 
     /// <summary>Chamado pelo inimigo quando encosta no jogador.</summary>
     public void LevarDano(Vector2 origemDoDano)
     {
-        if (tempoInvencivelAtual > 0) return;
+        if (morto || invencivel > 0f) return;
+        GameManager gm = GameManager.Garantir();
+        if (gm.Estado != EstadoJogo.Jogando) return;
 
-        Vidas--;
-        tempoInvencivelAtual = tempoInvencivel;
-
-        // Empurrãozinho para trás/cima
-        Vector2 dir = ((Vector2)transform.position - origemDoDano).normalized;
-        rb.linearVelocity = new Vector2(dir.x * 6f, 7f);
-
-        // Pisca para mostrar invencibilidade
-        if (sprite != null) StartCoroutine(Piscar());
-
-        GameManager.Instance?.AtualizarHUD();
-
-        if (Vidas <= 0)
+        int restantes = gm.PerderVida();
+        if (restantes <= 0)
         {
-            GameManager.Instance?.Derrota();
+            Morrer();
+            return;
         }
+
+        invencivel = tempoInvencivel;
+        semControle = 0.3f;
+        float dirX = transform.position.x >= origemDoDano.x ? 1f : -1f;
+        rb.linearVelocity = new Vector2(dirX * 5f, 8f);
     }
 
-    /// <summary>Chamado quando pisa no inimigo.</summary>
-    public void Quicar(float forca = 10f)
+    /// <summary>Quique ao pisar em um inimigo.</summary>
+    public void Quicar(float forca)
     {
         rb.linearVelocity = new Vector2(rb.linearVelocity.x, forca);
+        cortouPulo = true;
+        coyote = 0f;
     }
 
-    System.Collections.IEnumerator Piscar()
+    void CairNoVazio()
     {
-        for (int i = 0; i < 5; i++)
+        GameManager gm = GameManager.Garantir();
+        int restantes = gm.PerderVida();
+        if (restantes <= 0)
         {
-            sprite.enabled = false;
-            yield return new WaitForSeconds(0.1f);
-            sprite.enabled = true;
-            yield return new WaitForSeconds(0.1f);
+            Morrer();
+            return;
         }
+        transform.position = new Vector3(ultimoSeguro.x, ultimoSeguro.y + 0.1f, 0f);
+        rb.position = transform.position;
+        rb.linearVelocity = Vector2.zero;
+        invencivel = tempoInvencivel + 0.5f;
+        semControle = 0f;
+    }
+
+    void Morrer()
+    {
+        morto = true;
+        anim.Tocar(spDano, 8f, false);
+        col.enabled = false;
+        rb.linearVelocity = new Vector2(0f, 9f);
+        GameManager.Garantir().Derrota();
     }
 
     void OnDrawGizmosSelected()
     {
-        if (peDoJogador != null)
-        {
-            Gizmos.color = Color.yellow;
-            Gizmos.DrawWireSphere(peDoJogador.position, raioChao);
-        }
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireCube(transform.position + new Vector3(0f, -0.03f, 0f), new Vector3(0.4f, 0.12f, 0f));
     }
 }

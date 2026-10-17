@@ -1,45 +1,39 @@
 using UnityEngine;
 
 /// <summary>
-/// Item colecionável (moeda, maçã, banana...).
-/// Precisa de CircleCollider2D com IsTrigger = true.
-/// Flutua + gira por código, então funciona mesmo sem Animator.
+/// Item colecionável (moeda, maçã, banana...). Precisa de um Collider2D com IsTrigger.
+/// O visual (filho) flutua; o collider fica parado.
 /// </summary>
 [RequireComponent(typeof(Collider2D))]
 public class Coletavel : MonoBehaviour
 {
-    [Header("Pontos")]
-    public int valor = 10;
-    public string nomeItem = "Moeda";
-
-    [Header("Animação por código")]
-    public bool flutuar = true;
-    public float alturaFlutuar = 0.15f;
+    public int valor = GameManager.PontosMoeda;
+    public Transform visual;
+    public float alturaFlutuar = 0.12f;
     public float velocidadeFlutuar = 3f;
 
-    private Vector3 posInicial;
+    private bool coletado;
+    private float fase;
 
     void Start()
     {
-        posInicial = transform.position;
-        // Garante que conta para a vitória
-        GameManager.Instance?.RegistrarColetavel();
+        fase = Random.value * 6.28f;
     }
 
     void Update()
     {
-        if (flutuar)
-        {
-            float y = Mathf.Sin(Time.time * velocidadeFlutuar) * alturaFlutuar;
-            transform.position = posInicial + new Vector3(0, y, 0);
-        }
+        if (visual == null) return;
+        visual.localPosition = new Vector3(0f, Mathf.Sin(Time.time * velocidadeFlutuar + fase) * alturaFlutuar, 0f);
     }
 
     void OnTriggerEnter2D(Collider2D outro)
     {
-        if (!outro.CompareTag("Player")) return;
+        if (coletado) return;
+        if (outro.GetComponent<PlayerController2D>() == null) return;
 
-        GameManager.Instance?.ColetarItem(valor);
+        coletado = true;
+        GameManager gm = GameManager.Garantir();
+        gm.ColetarMoeda(valor);
         Destroy(gameObject);
     }
 }

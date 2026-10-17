@@ -1,150 +1,147 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using TMPro;
+
+public enum EstadoJogo { Menu, Jogando, FaseConcluida, Vitoria, Derrota }
 
 /// <summary>
-/// Controla pontos, vidas, vitória e derrota. Não destruir entre fases.
-/// Arraste os Textos do Canvas nos campos hudPontos / hudVidas / hudFase.
+/// Guarda pontos, vidas e o andamento das fases. Persiste entre as cenas.
+/// É criado automaticamente (GameManager.Garantir), não precisa estar na cena.
 /// </summary>
 public class GameManager : MonoBehaviour
 {
-    public static GameManager Instance { get; private set; }
+    public static GameManager Instancia { get; private set; }
 
-    [Header("Estado")]
-    public int pontos = 0;
-    public int totalColetaveisFase = 0;
-    public int coletadosFase = 0;
-
-    [Header("HUD (arraste aqui)")]
-    public TMP_Text hudPontos;
-    public TMP_Text hudVidas;
-    public TMP_Text hudFase;
-
-    [Header("Cenas (nome exato no Build Settings)")]
-    public string cenaFase1 = "Fase1";
-    public string cenaFase2 = "Fase2";
-    public string cenaFinal = "CenaFinal";
-
-    // Usado pela CenaFinal para mostrar vitória/derrota
+    // Resultado lido pela CenaFinal
     public static bool UltimaVitoria = false;
     public static int PontosFinais = 0;
 
+    [Header("Estado")]
+    public int pontos = 0;
+    public int vidasIniciais = 3;
+    public int vidas = 3;
+    public int faseAtual = 1;
+    public int totalFases = 2;
+    public int moedasColetadas = 0;
+    public int moedasTotal = 0;
+    public EstadoJogo Estado = EstadoJogo.Menu;
+    public float limiteQueda = -6f;
+    public string mensagem = "";
+
+    public const int PontosMoeda = 10;
+    public const int PontosInimigo = 100;
+
+    public static GameManager Garantir()
+    {
+        if (Instancia == null)
+        {
+            GameManager achado = FindFirstObjectByType<GameManager>();
+            if (achado != null)
+            {
+                Instancia = achado;
+            }
+            else
+            {
+                GameObject go = new GameObject("GameManager");
+                Instancia = go.AddComponent<GameManager>();
+            }
+        }
+        return Instancia;
+    }
+
     void Awake()
     {
-        if (Instance != null && Instance != this)
+        if (Instancia != null && Instancia != this)
         {
             Destroy(gameObject);
             return;
         }
-        Instance = this;
+        Instancia = this;
         DontDestroyOnLoad(gameObject);
     }
 
-    void OnEnable()
+    public void NovoJogo()
     {
-        SceneManager.sceneLoaded += AoCarregarCena;
+        pontos = 0;
+        vidas = vidasIniciais;
+        faseAtual = 1;
+        moedasColetadas = 0;
+        moedasTotal = 0;
+        mensagem = "";
+        Estado = EstadoJogo.Jogando;
+        SceneManager.LoadScene(Jogo.CenaFase1);
     }
 
-    void OnDisable()
+    public void IrParaMenu()
     {
-        SceneManager.sceneLoaded -= AoCarregarCena;
+        Estado = EstadoJogo.Menu;
+        mensagem = "";
+        SceneManager.LoadScene(Jogo.CenaMenu);
     }
 
-    void AoCarregarCena(Scene cena, LoadSceneMode modo)
+    /// <summary>Chamado pelo construtor da fase quando ela está pronta.</summary>
+    public void IniciarFase(int numero, int totalMoedas)
     {
-        // Zera contagem da fase nova e reconecta o HUD (o Canvas é novo por cena)
-        totalColetaveisFase = 0;
-        coletadosFase = 0;
-
-        if (hudPontos == null) hudPontos = GameObject.Find("TxtPontos")?.GetComponent<TMP_Text>();
-        if (hudVidas == null) hudVidas = GameObject.Find("TxtVidas")?.GetComponent<TMP_Text>();
-        if (hudFase == null) hudFase = GameObject.Find("TxtFase")?.GetComponent<TMP_Text>();
-
-        AtualizarHUD();
+        faseAtual = numero;
+        moedasTotal = totalMoedas;
+        moedasColetadas = 0;
+        mensagem = "";
+        Estado = EstadoJogo.Jogando;
     }
 
-    public void RegistrarColetavel()
+    public void ColetarMoeda(int valor)
     {
-        totalColetaveisFase++;
-    }
-
-    public void ColetarItem(int valor)
-    {
+        if (Estado != EstadoJogo.Jogando) return;
         pontos += valor;
-        coletadosFase++;
-        AtualizarHUD();
-
-        // VITÓRIA DA FASE = coletou tudo que existia nela
-        if (totalColetaveisFase > 0 && coletadosFase >= totalColetaveisFase)
-        {
-            VitoriaFase();
-        }
+        moedasColetadas++;
+        if (moedasTotal > 0 && moedasColetadas >= moedasTotal) ConcluirFase();
     }
 
     public void AdicionarPontos(int valor)
     {
+        if (Estado != EstadoJogo.Jogando) return;
         pontos += valor;
-        AtualizarHUD();
     }
 
-    void VitoriaFase()
+    /// <summary>Tira uma vida e devolve quantas restam.</summary>
+    public int PerderVida()
     {
-        string atual = SceneManager.GetActiveScene().name;
-
-        if (atual == cenaFase1)
-        {
-            SceneManager.LoadScene(cenaFase2);
-        }
-        else
-        {
-            // Era a Fase2 -> zerou o jogo
-            VitoriaJogo();
-        }
-    }
-
-    public void VitoriaJogo()
-    {
-        UltimaVitoria = true;
-        PontosFinais = pontos;
-        SceneManager.LoadScene(cenaFinal);
+        vidas = Mathf.Max(0, vidas - 1);
+        return vidas;
     }
 
     public void Derrota()
     {
-        // Se ainda tem vida, só atualiza HUD. Se zerou, vai pro final.
-        var player = FindFirstObjectByType<PlayerController2D>();
-        if (player != null && player.Vidas > 0)
-        {
-            AtualizarHUD();
-            return;
-        }
-
+        if (Estado == EstadoJogo.Derrota || Estado == EstadoJogo.Vitoria) return;
+        Estado = EstadoJogo.Derrota;
         UltimaVitoria = false;
         PontosFinais = pontos;
-        SceneManager.LoadScene(cenaFinal);
+        mensagem = "";
+        StartCoroutine(CarregarDepois(Jogo.CenaFinal, 1.4f));
     }
 
-    public void AtualizarHUD()
+    void ConcluirFase()
     {
-        if (hudPontos == null) hudPontos = GameObject.Find("TxtPontos")?.GetComponent<TMP_Text>();
-        if (hudVidas == null) hudVidas = GameObject.Find("TxtVidas")?.GetComponent<TMP_Text>();
-
-        if (hudPontos != null) hudPontos.text = "Pontos: " + pontos;
-
-        var player = FindFirstObjectByType<PlayerController2D>();
-        if (hudVidas != null)
+        if (faseAtual < totalFases)
         {
-            int v = player != null ? player.Vidas : 3;
-            hudVidas.text = "Vidas: " + v;
+            Estado = EstadoJogo.FaseConcluida;
+            mensagem = "FASE " + faseAtual + " CONCLUÍDA!";
+            string proxima = faseAtual == 1 ? Jogo.CenaFase2 : Jogo.CenaFase1;
+            StartCoroutine(CarregarDepois(proxima, 1.8f));
         }
-
-        if (hudFase != null) hudFase.text = SceneManager.GetActiveScene().name;
+        else
+        {
+            Estado = EstadoJogo.Vitoria;
+            UltimaVitoria = true;
+            PontosFinais = pontos;
+            mensagem = "VOCÊ COLETOU TUDO!";
+            StartCoroutine(CarregarDepois(Jogo.CenaFinal, 1.8f));
+        }
     }
 
-    // Chamado pelo botão "Jogar Novamente" da CenaFinal
-    public void ReiniciarJogo()
+    IEnumerator CarregarDepois(string cena, float segundos)
     {
-        pontos = 0;
-        SceneManager.LoadScene(cenaFase1);
+        yield return new WaitForSeconds(segundos);
+        SceneManager.LoadScene(cena);
     }
 }
